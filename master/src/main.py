@@ -1,13 +1,14 @@
 import asyncio
 import os
 from typing import Optional
+import csv
 
+import uvicorn
 import asyncpg
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from .rabbitmq_client import RabbitMQClient
-
 
 class ValidateRequest(BaseModel):
     user_id: str
@@ -79,6 +80,16 @@ async def validate_handler(
     pool: asyncpg.Pool = Depends(get_db_pool),
     rabbit_client: RabbitMQClient = Depends(get_rabbit_client),
 ) -> ValidateResponse:
+
+    domain = payload.email.split('@')[-1]
+    if domain in INVALID_DOMAINS:
+        return ValidateResponse(
+            status="failed",
+            email_address=payload.email,
+            is_valid=False,
+            message="Invalid domain",
+        )
+
     existing = await _fetch_existing_result(pool, payload.email)
     if existing is not None:
         return ValidateResponse(
@@ -146,8 +157,16 @@ async def poll_result_from_db(
         await asyncio.sleep(sleep_time)
 
 
+def load_invalid_domains() -> set[str]:
+    if os.path.exists('./data/invalid_domains.csv'):
+        with open('./data/invalid_domains.csv', 'r') as f:
+            reader = csv.reader(f)
+            return set(row[0] for row in reader)
+    return set()
+
+INVALID_DOMAINS = load_invalid_domains()
+
 def main() -> None:
-    import uvicorn
 
     uvicorn.run(
         "src.main:app",
