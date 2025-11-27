@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import Optional
 import csv
+import sys
 
 import uvicorn
 import asyncpg
@@ -9,6 +10,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, EmailStr
 
 from .rabbitmq_client import RabbitMQClient
+
+csv.field_size_limit(sys.maxsize)
 
 class ValidateRequest(BaseModel):
     user_id: str
