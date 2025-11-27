@@ -128,11 +128,11 @@ async def _fetch_existing_result(pool: asyncpg.Pool, email: str) -> Optional[asy
 
 
 async def poll_result_from_db(
-    pool: asyncpg.Pool, email: str, timeout_seconds: int = os.environ.get("POLL_RESULT_TIMEOUT", 60)
+    pool: asyncpg.Pool, email: str, timeout_seconds: int = int(os.environ.get("POLL_RESULT_TIMEOUT", 60))
 ) -> Optional[dict]:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_seconds
-    poll_interval = os.environ.get("POLL_INTERVAL", 0.2)  # 200ms
+    poll_interval = float(os.environ.get("POLL_INTERVAL", 0.2))  # 200ms
 
     while True:
         remaining = deadline - loop.time()
