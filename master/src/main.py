@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 from typing import Optional
 import csv
@@ -28,6 +29,36 @@ class ValidateResponse(BaseModel):
 
 app = FastAPI(title="Distributed Worker Pool Master")
 
+user_credits_cache = {}
+async def get_user_credits(user_id: str, user_secret: str) -> int:
+    if user_id in user_credits_cache and user_credits_cache[user_id]['secret'] == user_secret:
+        return user_credits_cache[user_id]['credits']
+    else:
+        pool = await get_db_pool()
+        async with pool.acquire() as connection:
+            query = "SELECT credits FROM users WHERE username = $1 AND key = $2"
+            row = await connection.fetchrow(query, user_id, user_secret)
+            if row is not None:
+                user_credits_cache[user_id] = {
+                    'secret': user_secret,
+                    'credits': row['credits']
+                }
+                return user_credits_cache[user_id]['credits']
+            else:
+                return 0
+
+async def update_user_credits() -> None:
+    pool = await get_db_pool()
+    async with pool.acquire() as connection:
+        for user_id in user_credits_cache:
+            query = "UPDATE users SET credits = $1 WHERE username = $2"
+            await connection.execute(query, user_credits_cache[user_id]['credits'], user_id)
+        user_credits_cache.clear()
+
+async def periodic_update():
+    while True:
+        await update_user_credits()
+        await asyncio.sleep(60)
 
 async def _create_db_pool() -> asyncpg.Pool:
     database_host = os.environ["DB_HOST"]
@@ -64,6 +95,7 @@ async def get_rabbit_client() -> RabbitMQClient:
 async def startup_event() -> None:
     app.state.db_pool = await _create_db_pool()
     app.state.rabbitmq_client = await RabbitMQClient.from_env()
+    app.state.periodic_task = asyncio.create_task(periodic_update())
 
 
 @app.on_event("shutdown")
@@ -75,6 +107,11 @@ async def shutdown_event() -> None:
     rabbit_client: Optional[RabbitMQClient] = getattr(app.state, "rabbitmq_client", None)
     if rabbit_client is not None:
         await rabbit_client.close()
+    periodic_task: Optional[asyncio.Task] = getattr(app.state, "periodic_task", None)
+    if periodic_task is not None:
+        periodic_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await periodic_task
 
 
 @app.post("/api/validate", response_model=ValidateResponse)
@@ -83,6 +120,17 @@ async def validate_handler(
     pool: asyncpg.Pool = Depends(get_db_pool),
     rabbit_client: RabbitMQClient = Depends(get_rabbit_client),
 ) -> ValidateResponse:
+
+    user_id = payload.user_id
+    user_secret = payload.user_secret
+    user_credits = await get_user_credits(user_id, user_secret)
+    if user_credits <= 0:
+        return ValidateResponse(
+            status="failed",
+            email_address=payload.email,
+            is_valid=False,
+            message="Insufficient credits",
+        )
 
     domain = payload.email.split('@')[-1]
     if domain in INVALID_DOMAINS:
@@ -106,6 +154,7 @@ async def validate_handler(
 
     result = await poll_result_from_db(pool, payload.email)
     if result is not None:
+        user_credits_cache[user_id]['credits'] = user_credits - 1
         return ValidateResponse(
             status="success",
             email_address=payload.email,
@@ -170,7 +219,6 @@ def load_invalid_domains() -> set[str]:
 INVALID_DOMAINS = load_invalid_domains()
 
 def main() -> None:
-
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",
