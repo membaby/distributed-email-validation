@@ -53,7 +53,6 @@ async def update_user_credits() -> None:
         for user_id in user_credits_cache:
             query = "UPDATE users SET credits = $1 WHERE username = $2"
             await connection.execute(query, user_credits_cache[user_id]['credits'], user_id)
-        user_credits_cache.clear()
 
 async def periodic_update():
     while True:
@@ -154,6 +153,11 @@ async def validate_handler(
 
     result = await poll_result_from_db(pool, payload.email)
     if result is not None:
+        if user_id not in user_credits_cache:
+            user_credits_cache[user_id] = {
+                'secret': user_secret,
+                'credits': user_credits,
+            }
         user_credits_cache[user_id]['credits'] = user_credits - 1
         return ValidateResponse(
             status="success",
