@@ -1,0 +1,63 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: database
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db-init/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - app-network
+
+
+  rabbitmq:
+    image: rabbitmq:management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"      # AMQP protocol (for producers/consumers)
+      - "15672:15672"    # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app-network
+
+  master_app:
+    build: ./master
+    container_name: master_app
+    env_file:
+      - .env
+    ports:
+      - "5005:5005"
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - app-network
+
+  slave:
+    build: ./slave
+    env_file:
+      - .env
+    networks:
+      - app-network
+
+
+
+volumes:
+  rabbitmq_data:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge
