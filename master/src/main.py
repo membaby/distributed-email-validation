@@ -155,9 +155,13 @@ async def poll_result_from_db(
 
 def load_invalid_domains() -> set[str]:
     if os.path.exists('./data/invalid_domains.csv'):
+        set_invalid_domains = set()
         with open('./data/invalid_domains.csv', 'r') as f:
             reader = csv.reader(f)
-            return set(row[0] for row in reader)
+            for row in reader:
+                if len(row) > 0:
+                    set_invalid_domains.add(row[0])
+        return set_invalid_domains
     return set()
 
 INVALID_DOMAINS = load_invalid_domains()
